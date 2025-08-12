@@ -1,0 +1,11 @@
+import { ForgotPasswordForm } from "./_forgot-password-form";
+import { ErrorAlert } from "./_error-alert";
+
+export function Component() {
+  return (
+    <div className="flex flex-col gap-8">
+      <ForgotPasswordForm />
+      <ErrorAlert />
+    </div>
+  );
+}

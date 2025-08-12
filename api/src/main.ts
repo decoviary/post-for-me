@@ -1,0 +1,79 @@
+import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { apiReference } from '@scalar/nestjs-api-reference';
+
+import { AppModule } from './app.module';
+
+import { mediaControllerDescription } from './media/docs/media-controller.md';
+import { postsControllerDescription } from './social-posts/docs/posts-controller.md';
+import { socialAccountsControllerDescription } from './social-provider-connections/docs/social-accounts-controller';
+import { postResultsControllerDescription } from './social-post-results/docs/post-results-controller.md';
+import { join } from 'path';
+import { gettingStartedDescription } from './getting-started.md';
+
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import type { NextFunction, Request, Response } from 'express';
+
+async function bootstrap() {
+  const app: NestExpressApplication = await NestFactory.create(AppModule);
+
+  app.enableVersioning({
+    type: VersioningType.URI,
+    defaultVersion: '1',
+  });
+
+  const config = new DocumentBuilder()
+    .setTitle('Post for Me API')
+    .setDescription(
+      `The official API for [Post for Me](https://www.postforme.dev/)
+      `,
+    )
+    .addTag(
+      'Auth',
+      `Authentication is required for all endpoints. Provide a valid API key as a Bearer token in the Authorization header. 
+      Log in to your [Post for Me](https://www.postforme.dev/) account to retrieve your API key.`,
+    )
+    .addTag('Getting Started', gettingStartedDescription)
+    .addTag('Media', mediaControllerDescription)
+    .addTag('Social Posts', postsControllerDescription)
+    .addTag('Social Accounts', socialAccountsControllerDescription)
+    .addTag('Social Post Results', postResultsControllerDescription)
+    .setVersion('1.0')
+    .addBearerAuth()
+    .setTermsOfService('https://www.postforme.dev/terms')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+
+  app.use(
+    '/docs',
+    apiReference({
+      content: document,
+      theme: 'default',
+      customfavIcon: '/favicon.ico',
+      metaData: {
+        title: 'Post for Me API',
+      },
+    }),
+  );
+
+  app.use('/', (req: Request, res: Response, next: NextFunction) => {
+    if (req.url === '/') {
+      return res.redirect(301, '/docs');
+    }
+    next();
+  });
+
+  app.useStaticAssets(join(__dirname, '..', 'public'));
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true, // Automatically transforms payloads to DTO instances and performs type conversion
+    }),
+  );
+
+  await app.listen(process.env.PORT ?? 3000);
+}
+
+void bootstrap();
