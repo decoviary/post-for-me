@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@trigger.dev/build": "^3.3.17",
+    "@types/fluent-ffmpeg": "^2.1.27",
     "eslint-plugin-react": "^7.37.5",
     "supabase": "^2.30.4",
     "typescript-eslint": "^8.33.0"
