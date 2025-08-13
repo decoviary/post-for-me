@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import { APP_URL } from "~/lib/constants";
 
 import { Button } from "~/ui/button";
 
@@ -27,7 +28,7 @@ export function Hero() {
         </p>
 
         <Button asChild className="self-start">
-          <Link to="/app">Start for Free</Link>
+          <Link to={APP_URL}>Start for Free</Link>
         </Button>
       </div>
 
