@@ -63,9 +63,11 @@ export function SignInForm() {
           </span>
         </div>
 
-        <Button asChild variant="secondary" className="w-full">
-          <Link to="/sign-in/password">Sign in with Password</Link>
-        </Button>
+        <div className="grid gap-3">
+          <Button asChild variant="secondary" className="w-full">
+            <Link to="/sign-in">Sign in with One-Time Code</Link>
+          </Button>
+        </div>
       </div>
 
       <div className="text-center text-sm">

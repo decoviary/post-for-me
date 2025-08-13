@@ -8,10 +8,12 @@ export const action = withSupabase(async ({ supabase, request }) => {
     throw new Error("Email is required");
   }
 
+  const { origin } = new URL(request.url);
+
   const signIn = await supabase.auth.signInWithOtp({
     email,
     options: {
-      shouldCreateUser: true,
+      emailRedirectTo: `${origin}/sign-in/confirm`,
     },
   });
 

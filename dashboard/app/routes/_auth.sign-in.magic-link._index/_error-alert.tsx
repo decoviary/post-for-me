@@ -5,12 +5,8 @@ import { Alert, AlertDescription, AlertTitle } from "~/ui/alert";
 import { TriangleExclamationIcon } from "icons";
 
 function errorMessage(code: string | null) {
-  if (code === "otp_expired") {
-    return "Your one-time code has expired. Please request a new one.";
-  }
-
-  if (code === "invalid_otp") {
-    return "Invalid one-time code. Please check your email and try again.";
+  if (code === "link_expired") {
+    return "Your magic link has expired. Please try again.";
   }
 
   return "Something went wrong. Please try again.";

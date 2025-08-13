@@ -1,10 +1,10 @@
-import { OtpForm } from "./_otp-form";
+import { SignInForm } from "./_sign-in-form";
 import { ErrorAlert } from "./_error-alert";
 
 export function Component() {
   return (
     <div className="flex flex-col gap-8">
-      <OtpForm />
+      <SignInForm />
       <ErrorAlert />
     </div>
   );
