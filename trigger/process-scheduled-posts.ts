@@ -1,4 +1,4 @@
-import { logger, schedules } from "@trigger.dev/sdk/v3";
+import { logger, schedules } from "@trigger.dev/sdk";
 import { createClient } from "@supabase/supabase-js";
 
 import { processPost } from "./process-post";
