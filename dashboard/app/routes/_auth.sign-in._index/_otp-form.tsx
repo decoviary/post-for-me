@@ -71,7 +71,7 @@ export function OtpForm() {
             disabled={disabled}
             loading={isSubmitting}
           >
-            <KeyIcon className="mr-2 h-4 w-4" />
+            <KeyIcon />
             Verify Code
           </Button>
 
