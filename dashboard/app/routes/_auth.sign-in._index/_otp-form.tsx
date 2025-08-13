@@ -128,7 +128,7 @@ export function OtpForm() {
           disabled={disabled}
           loading={isSubmitting}
         >
-          <PaperPlaneIcon className="mr-2 h-4 w-4" />
+          <PaperPlaneIcon />
           Send Code
         </Button>
       </div>
