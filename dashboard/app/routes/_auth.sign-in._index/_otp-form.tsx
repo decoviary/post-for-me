@@ -79,17 +79,12 @@ export function OtpForm() {
             <button
               type="button"
               onClick={() => {
-                navigate("/sign-in.otp");
+                navigate(0);
               }}
               className="text-primary hover:underline"
             >
               Didn&apos;t receive a code? Send again
             </button>
-            <div>
-              <Link to="/sign-in" className="text-primary hover:underline">
-                Back to sign in
-              </Link>
-            </div>
           </div>
         </div>
       </Form>
@@ -136,7 +131,6 @@ export function OtpForm() {
           <PaperPlaneIcon className="mr-2 h-4 w-4" />
           Send Code
         </Button>
-
       </div>
 
       <div className="text-center text-sm">
