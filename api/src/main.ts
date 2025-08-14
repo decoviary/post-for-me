@@ -25,16 +25,7 @@ async function bootstrap() {
 
   const config = new DocumentBuilder()
     .setTitle('Post for Me API')
-    .setDescription(
-      `The official API for [Post for Me](https://www.postforme.dev/)
-      `,
-    )
-    .addTag(
-      'Auth',
-      `Authentication is required for all endpoints. Provide a valid API key as a Bearer token in the Authorization header. 
-      Log in to your [Post for Me](https://www.postforme.dev/) account to retrieve your API key.`,
-    )
-    .addTag('Getting Started', gettingStartedDescription)
+    .setDescription(gettingStartedDescription)
     .addTag('Media', mediaControllerDescription)
     .addTag('Social Posts', postsControllerDescription)
     .addTag('Social Accounts', socialAccountsControllerDescription)
@@ -45,6 +36,8 @@ async function bootstrap() {
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
+
+  SwaggerModule.setup('swagger', app, document);
 
   app.use(
     '/docs',
