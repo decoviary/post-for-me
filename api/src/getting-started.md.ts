@@ -91,4 +91,10 @@ Follow the links below for our official libraries:
 
 [TypeScript](https://www.npmjs.com/package/post-for-me)
 
+[Python](https://pypi.org/project/post-for-me/)
+
+[Ruby](https://rubygems.org/gems/post-for-me)
+
+[Go](https://pkg.go.dev/github.com/DayMoonDevelopment/post-for-me-go)
+
 `;
