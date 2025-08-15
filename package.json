@@ -15,20 +15,19 @@
     "dev:api": "bun run --filter=@post-for-me/api start:dev",
     "lint": "bun run --filter=\"*\" lint",
     "typecheck": "bun run --filter=\"*\" typecheck",
-    "dev:trigger": "bunx trigger.dev@latest dev",
+    "dev:trigger": "bunx trigger.dev@4.0.0-v4-beta.27 dev",
     "dev:init": "supabase db reset && bun supabase:typegen",
-    "trigger_deploy:stage": "bunx trigger.dev deploy --env staging",
-    "trigger_deploy": "bunx trigger.dev deploy",
     "supabase:typegen": "supabase gen types typescript --local > ./supabase/supabase.types.ts"
   },
   "devDependencies": {
-    "@trigger.dev/build": "^3.3.17",
+    "@trigger.dev/build": "4.0.0-v4-beta.27",
+    "@types/fluent-ffmpeg": "^2.1.27",
     "eslint-plugin-react": "^7.37.5",
     "supabase": "^2.30.4",
     "typescript-eslint": "^8.33.0"
   },
   "dependencies": {
-    "@trigger.dev/sdk": "^3.3.17",
+    "@trigger.dev/sdk": "4.0.0-v4-beta.27",
     "crypto": "^1.0.1",
     "dotenv": "^17.2.1",
     "fluent-ffmpeg": "^2.1.3",

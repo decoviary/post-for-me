@@ -1,4 +1,4 @@
-import { logger, task } from "@trigger.dev/sdk/v3";
+import { logger, task } from "@trigger.dev/sdk";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
 import fetch from "node-fetch";

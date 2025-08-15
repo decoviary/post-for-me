@@ -1,4 +1,4 @@
-import { logger, schedules } from "@trigger.dev/sdk/v3";
+import { logger, schedules } from "@trigger.dev/sdk";
 import { Unkey } from "@unkey/api";
 
 const unkey = new Unkey({ rootKey: process.env.UNKEY_ROOT_KEY! });
