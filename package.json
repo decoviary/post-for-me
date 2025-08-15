@@ -17,8 +17,6 @@
     "typecheck": "bun run --filter=\"*\" typecheck",
     "dev:trigger": "bunx trigger.dev@4.0.0-v4-beta.27 dev",
     "dev:init": "supabase db reset && bun supabase:typegen",
-    "trigger_deploy:stage": "bunx trigger.dev deploy --env staging",
-    "trigger_deploy": "bunx trigger.dev deploy",
     "supabase:typegen": "supabase gen types typescript --local > ./supabase/supabase.types.ts"
   },
   "devDependencies": {

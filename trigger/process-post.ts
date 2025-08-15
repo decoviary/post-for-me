@@ -1,4 +1,4 @@
-import { logger, task } from "@trigger.dev/sdk";
+import { logger, task, tasks } from "@trigger.dev/sdk";
 import { createClient } from "@supabase/supabase-js";
 import type {
   IndividualPostData,
@@ -7,12 +7,9 @@ import type {
   Post,
   PostResult,
 } from "./posting/post.types";
-import { postToPlatform } from "./post-to-platform";
 import { Unkey } from "@unkey/api";
 
 import { Database } from "@post-for-me/db";
-import { processPostMedium } from "process-post-medium";
-import { ffmpegProcessVideo } from "ffmpeg-process-video";
 
 const supabaseClient = createClient<Database>(
   process.env.SUPABASE_URL!,
@@ -106,7 +103,8 @@ export const processPost = task({
       if (post.social_post_media && post.social_post_media.length > 0) {
         logger.info("Localizing Media", { media: post.social_post_media });
 
-        const localizedMedia = await processPostMedium.batchTriggerAndWait(
+        const localizedMedia = await tasks.batchTriggerAndWait(
+          "process-post-medium",
           post.social_post_media.map((medium) => ({
             payload: {
               medium: {
@@ -134,14 +132,14 @@ export const processPost = task({
 
         if (postVideos.length > 0) {
           logger.info("Processing Videos");
-          const processVideosResult =
-            await ffmpegProcessVideo.batchTriggerAndWait(
-              postVideos.map((video) => ({
-                payload: {
-                  medium: video,
-                },
-              }))
-            );
+          const processVideosResult = await tasks.batchTriggerAndWait(
+            "ffmpeg-process-video",
+            postVideos.map((video) => ({
+              payload: {
+                medium: video,
+              },
+            }))
+          );
 
           logger.info("Processing Videos Complete", { processVideosResult });
         }
@@ -274,7 +272,8 @@ export const processPost = task({
       }
 
       logger.info("Posting To Accounts", { bulkPostData });
-      const batchPostResult = await postToPlatform.batchTriggerAndWait(
+      const batchPostResult = await tasks.batchTriggerAndWait(
+        "post-to-platform",
         bulkPostData.map((data) => ({ payload: data }))
       );
 

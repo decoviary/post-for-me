@@ -1,7 +1,5 @@
-import { logger, schedules } from "@trigger.dev/sdk";
+import { logger, schedules, tasks } from "@trigger.dev/sdk";
 import { createClient } from "@supabase/supabase-js";
-
-import { processPost } from "./process-post";
 import { Post } from "posting/post.types";
 
 import { Database } from "@post-for-me/db";
@@ -81,7 +79,8 @@ export const processScheduledPosts = schedules.task({
 
       logger.info("Processing scheduled posts", { count: posts.length });
 
-      const result = await processPost.batchTrigger(
+      const result = await tasks.batchTrigger(
+        "process-post",
         posts.map((post, index) => {
           const typedPost = post as Post;
           return {
