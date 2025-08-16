@@ -3,9 +3,9 @@ import ffmpeg from "fluent-ffmpeg";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
-import { createClient } from "@supabase/supabase-js";
 import fetch from "node-fetch";
-import { Database } from "@post-for-me/db";
+import { createReadStream } from "fs";
+import { Upload } from "tus-js-client";
 
 // Constants
 const DEFAULT_FRAME_RATE = 24;
@@ -18,6 +18,58 @@ const ASPECT_RATIOS = {
   CLASSIC: { ratio: 4 / 3, maxWidth: 1440, maxHeight: 1080 },
 };
 
+async function uploadFile({
+  bucketName,
+  key,
+  filePath,
+}: {
+  bucketName: string;
+  key: string;
+  filePath: string;
+}) {
+  return new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(filePath);
+
+    const upload = new Upload(stream, {
+      endpoint: `${process.env.SUPABASE_URL}/storage/v1/upload/resumable`,
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      headers: {
+        authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        "x-upsert": "true",
+      },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true, // Important if you want to allow re-uploading the same file https://github.com/tus/tus-js-client/blob/main/docs/api.md#removefingerprintonsuccess
+      metadata: {
+        bucketName: bucketName,
+        objectName: key,
+        contentType: "video/mp4",
+        cacheControl: "3600",
+      },
+      chunkSize: 6 * 1024 * 1024, // NOTE: it must be set to 6MB (for now) do not change it
+      onError: function (error) {
+        logger.error("Failed uploading video", { error });
+        reject(error);
+      },
+      onSuccess: function () {
+        logger.info("Video uploaded succesfully", { bucketName, key });
+        resolve();
+      },
+    });
+
+    // Check if there are any previous uploads to continue.
+    return upload.findPreviousUploads().then(function (previousUploads) {
+      // Found previous uploads so we select the first one.
+      if (previousUploads.length) {
+        upload.resumeFromPreviousUpload(previousUploads[0]);
+      }
+
+      // Start the upload
+      logger.info("Starting video upload", { bucketName, key });
+      upload.start();
+    });
+  });
+}
+
 // Optimized aspect ratio detection
 const detectAspectRatio = (width: number, height: number) => {
   const ratio = width / height;
@@ -28,12 +80,6 @@ const detectAspectRatio = (width: number, height: number) => {
     ) || ASPECT_RATIOS.LANDSCAPE
   ); // Default to landscape if no match
 };
-
-// Single Supabase client instance
-const supabaseClient = createClient<Database>(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 const getFileKeyFromPublicUrl = (
   publicUrl: string,
@@ -47,7 +93,12 @@ const getFileKeyFromPublicUrl = (
 export const ffmpegProcessVideo = task({
   id: "ffmpeg-process-video",
   maxDuration: 800,
-  retry: { maxAttempts: 2 },
+  retry: {
+    maxAttempts: 2,
+    outOfMemory: {
+      machine: "large-1x",
+    },
+  },
   machine: "medium-2x",
   run: async ({ medium: { url } }: { medium: { url: string } }) => {
     logger.info("Starting video processing", { url });
@@ -241,19 +292,9 @@ export const ffmpegProcessVideo = task({
       });
 
       fileProcessed = true;
-      logger.info("Reading processed video file");
-      const processedVideo = await fs.readFile(outputPath);
 
       logger.info("Uploading processed video to storage");
-      const { error } = await supabaseClient.storage
-        .from(bucket)
-        .upload(key, processedVideo, {
-          contentType: "video/mp4",
-          cacheControl: "public, max-age=31536000",
-          upsert: true,
-        });
-
-      if (error) throw new Error(`Upload failed: ${error.message}`);
+      await uploadFile({ bucketName: bucket, key, filePath: outputPath });
 
       logger.info("Video processing completed successfully", {
         key: key,
