@@ -6,6 +6,7 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { PostClient } from "../post-client";
 import axios from "axios";
+import fetch from "node-fetch";
 import {
   FacebookConfiguration,
   PlatformAppCredentials,
@@ -15,6 +16,7 @@ import {
   SocialAccount,
 } from "../post.types";
 import { logger } from "@trigger.dev/sdk";
+import FormData from "form-data";
 
 export class FacebookPostClient extends PostClient {
   #requests: any[] = [];
@@ -131,6 +133,14 @@ export class FacebookPostClient extends PostClient {
                   caption,
                   medium,
                 });
+
+                if (medium.thumbnail_url) {
+                  await this.#uploadThumbnail({
+                    medium,
+                    videoId: platformId,
+                    accessToken: account.access_token,
+                  });
+                }
 
                 platformUrl = `https://facebook.com/${account.social_provider_user_id}/videos/${platformId}`;
 
@@ -774,6 +784,14 @@ export class FacebookPostClient extends PostClient {
 
     const createdMediaId = uploadSessionResponseData.video_id;
 
+    if (medium.thumbnail_url) {
+      await this.#uploadThumbnail({
+        medium,
+        videoId: createdMediaId,
+        accessToken: account.access_token,
+      });
+    }
+
     const reelResponse = await axios.post(
       `https://graph.facebook.com/v20.0/${account.social_provider_user_id}/video_stories`,
       {
@@ -843,5 +861,41 @@ export class FacebookPostClient extends PostClient {
     }
 
     return createdMediaId;
+  }
+
+  async #uploadThumbnail({
+    medium,
+    videoId,
+    accessToken,
+  }: {
+    medium: PostMedia;
+    videoId: string;
+    accessToken: string;
+  }) {
+    if (!medium.thumbnail_url) {
+      return;
+    }
+
+    const file = await this.getFile({
+      type: medium.type,
+      url: medium.thumbnail_url,
+    });
+    const form = new FormData();
+    form.append("access_token", accessToken);
+    form.append("is_preferred", "true");
+
+    const buffer = await file.arrayBuffer();
+    form.append("source", buffer, {
+      filename: file.name,
+      contentType: file.type,
+    });
+
+    await fetch(`https://graph.facebook.com/v20.0/${videoId}/thumbnails`, {
+      method: "POST",
+      body: form,
+      headers: {
+        ...form.getHeaders(),
+      },
+    });
   }
 }
