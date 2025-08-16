@@ -6,19 +6,27 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { PostClient } from "../post-client";
 import axios from "axios";
-import FormData from "form-data";
 import {
+  FacebookConfiguration,
   PlatformAppCredentials,
   PostMedia,
   PostResult,
   RefreshTokenResult,
   SocialAccount,
 } from "../post.types";
+import { logger } from "@trigger.dev/sdk";
 
 export class FacebookPostClient extends PostClient {
   #requests: any[] = [];
   #responses: any[] = [];
   #appCredentials: PlatformAppCredentials;
+  #completeStatuses = [
+    "error",
+    "expired",
+    "ready",
+    "upload_failed",
+    "upload_complete",
+  ];
 
   constructor(
     supabaseClient: SupabaseClient,
@@ -75,14 +83,17 @@ export class FacebookPostClient extends PostClient {
     account,
     caption,
     media,
+    platformConfig,
   }: {
     postId: string;
     account: SocialAccount;
     caption: string;
     media: PostMedia[];
+    platformConfig: FacebookConfiguration;
   }): Promise<PostResult> {
     try {
       let platformId;
+      let platformUrl: string | undefined | null = undefined;
 
       switch (true) {
         case media.length === 0: {
@@ -94,25 +105,65 @@ export class FacebookPostClient extends PostClient {
           const medium = media[0];
 
           if (medium.type === "video") {
-            platformId = await this.#publishVideo({ account, caption, medium });
-            return {
-              success: true,
-              provider_connection_id: account.id,
-              post_id: postId,
-              provider_post_id: platformId,
-              provider_post_url: `https://facebook.com/${account.social_provider_user_id}/videos/${platformId}`,
-              details: {
-                requests: this.#requests,
-                responses: this.#responses,
-              },
-            };
+            switch (platformConfig?.placement) {
+              case "stories": {
+                platformId = await this.#publishVideoStory({ account, medium });
+
+                platformUrl = await this.#getStoryUrl({
+                  platformId,
+                  accessToken: account.access_token,
+                });
+                break;
+              }
+              case "reels": {
+                platformId = await this.#publishReel({
+                  account,
+                  caption,
+                  medium,
+                });
+
+                platformUrl = `https://www.facebook.com/reel/${platformId}/`;
+                break;
+              }
+              default: {
+                platformId = await this.#publishVideo({
+                  account,
+                  caption,
+                  medium,
+                });
+
+                platformUrl = `https://facebook.com/${account.social_provider_user_id}/videos/${platformId}`;
+
+                break;
+              }
+            }
+            break;
           }
 
-          platformId = await this.#createMediaPost({
-            account,
-            caption,
-            medium,
-          });
+          switch (platformConfig?.placement) {
+            case "stories": {
+              platformId = await this.#publishPhotoStory({
+                account,
+                caption,
+                medium,
+              });
+
+              platformUrl = await this.#getStoryUrl({
+                platformId,
+                accessToken: account.access_token,
+              });
+              break;
+            }
+            default: {
+              platformId = await this.#publishPhoto({
+                account,
+                caption,
+                medium,
+              });
+              break;
+            }
+          }
+
           break;
         }
         case media.length > 1: {
@@ -125,34 +176,37 @@ export class FacebookPostClient extends PostClient {
         }
       }
 
-      this.#requests.push({
-        postRequest: {
-          url: `https://graph.facebook.com/v20.0/${platformId}`,
-          params: {
-            fields: "permalink_url",
-            access_token: account.access_token,
+      if (!platformUrl) {
+        this.#requests.push({
+          postRequest: {
+            url: `https://graph.facebook.com/v20.0/${platformId}`,
+            params: {
+              fields: "permalink_url",
+              access_token: account.access_token,
+            },
           },
-        },
-      });
-      // Get the permalink URL for non-video posts
-      const postResponse = await axios.get(
-        `https://graph.facebook.com/v20.0/${platformId}`,
-        {
-          params: {
-            fields: "permalink_url",
-            access_token: account.access_token,
-          },
-        }
-      );
+        });
+        // Get the permalink URL for non-video posts
+        const postResponse = await axios.get(
+          `https://graph.facebook.com/v20.0/${platformId}`,
+          {
+            params: {
+              fields: "permalink_url",
+              access_token: account.access_token,
+            },
+          }
+        );
 
-      this.#responses.push({ postResponse: postResponse.data });
+        this.#responses.push({ postResponse: postResponse.data });
+        platformUrl = postResponse.data.permalink_url;
+      }
 
       return {
         success: true,
         post_id: postId,
         provider_connection_id: account.id,
         provider_post_id: platformId,
-        provider_post_url: postResponse.data.permalink_url,
+        provider_post_url: platformUrl ?? "https://www.facebook.com/profile",
         details: {
           requests: this.#requests,
           responses: this.#responses,
@@ -214,7 +268,7 @@ export class FacebookPostClient extends PostClient {
     return response.data.id;
   }
 
-  async #createMediaPost({
+  async #publishPhoto({
     account,
     caption,
     medium,
@@ -223,57 +277,34 @@ export class FacebookPostClient extends PostClient {
     caption: string;
     medium: PostMedia;
   }): Promise<string> {
-    const isVideo = medium.type === "video";
-    const file = await this.getFile(medium);
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const originalFilename = file.name || "FileUpload";
-    const lastDotIndex = originalFilename.lastIndexOf(".");
-    const baseFilename =
-      lastDotIndex > 0
-        ? originalFilename.substring(0, lastDotIndex)
-        : originalFilename;
-
-    const form = new FormData();
-    form.append("access_token", account.access_token);
-    form.append(isVideo ? "description" : "message", caption);
-    form.append("file", buffer, {
-      filename: `${baseFilename}.${isVideo ? "mp4" : "jpg"}`,
-      contentType: isVideo ? "video/mp4" : "image/jpeg",
-    });
-
-    const endpoint = isVideo ? "videos" : "photos";
-    const baseUrl = isVideo
-      ? "https://graph-video.facebook.com/v20.0"
-      : "https://graph.facebook.com/v20.0";
+    const fileUrl = await this.getSignedUrlForFile(medium);
+    const payload = {
+      url: fileUrl,
+      published: true,
+      message: caption,
+      access_token: account.access_token,
+    };
 
     this.#requests.push({
-      createMediaRequest: {
-        url: `${baseUrl}/${account.social_provider_user_id}/${endpoint}`,
-        file: `${baseFilename}.${isVideo ? "mp4" : "jpg"}`,
+      photoRequest: {
+        url: `https://graph-video.facebook.com/v20.0/${account.social_provider_user_id}/photos`,
+        data: payload,
       },
     });
-
-    const createMediaResponse = await axios.post(
-      `${baseUrl}/${account.social_provider_user_id}/${endpoint}`,
-      form,
-      {
-        headers: {
-          ...form.getHeaders(),
-        },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-      }
+    const photoResponse = await axios.post(
+      `https://graph.facebook.com/v20.0/${account.social_provider_user_id}/photos`,
+      payload
     );
 
-    this.#responses.push({ createMediaResponse: createMediaResponse.data });
+    this.#responses.push({ photoResponse: photoResponse.data });
 
-    if (createMediaResponse.data.error) {
+    if (photoResponse.data.error) {
       throw new Error(
-        `Failed to upload media: ${createMediaResponse.data.error.message}`
+        `Failed to upload media: ${photoResponse.data.error.message}`
       );
     }
 
-    return createMediaResponse.data.post_id || createMediaResponse.data.id;
+    return photoResponse.data.post_id || photoResponse.data.id;
   }
 
   async #createCarouselPost({
@@ -289,48 +320,32 @@ export class FacebookPostClient extends PostClient {
 
     // Upload each image
     for (const medium of media) {
-      const file = await this.getFile(medium);
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const originalFilename = file.name || "FileUpload";
-      const lastDotIndex = originalFilename.lastIndexOf(".");
-      const baseFilename =
-        lastDotIndex > 0
-          ? originalFilename.substring(0, lastDotIndex)
-          : originalFilename;
-
-      const form = new FormData();
-      form.append("access_token", account.access_token);
-      form.append("published", "false"); // Important for carousel
-      form.append("file", buffer, {
-        filename: `${baseFilename}.jpg`,
-        contentType: "image/jpeg",
-      });
+      const fileUrl = await this.getSignedUrlForFile(medium);
+      const payload = {
+        url: fileUrl,
+        message: caption,
+        published: false,
+        access_token: account.access_token,
+      };
 
       this.#requests.push({
-        createCarouselItemRequest: {
-          url: `https://graph.facebook.com/v20.0/${account.social_provider_user_id}/photos`,
-          file: `${baseFilename}.jpg`,
+        photoRequest: {
+          url: `https://graph-video.facebook.com/v20.0/${account.social_provider_user_id}/photos`,
+          data: payload,
         },
       });
-
-      const uploadResponse = await axios.post(
+      const photoResponse = await axios.post(
         `https://graph.facebook.com/v20.0/${account.social_provider_user_id}/photos`,
-        form,
-        {
-          headers: {
-            ...form.getHeaders(),
-          },
-        }
+        payload
       );
 
-      this.#responses.push({ createCarouselItemResponse: uploadResponse.data });
-
-      if (uploadResponse.data.error) {
+      this.#responses.push({ photoResponse: photoResponse.data });
+      if (photoResponse.data.error) {
         throw new Error(
-          `Failed to upload image: ${uploadResponse.data.error.message}`
+          `Failed to upload image: ${photoResponse.data.error.message}`
         );
       }
-      mediaIds.push({ media_fbid: uploadResponse.data.id });
+      mediaIds.push({ media_fbid: photoResponse.data.id });
     }
 
     this.#requests.push({
@@ -440,5 +455,393 @@ export class FacebookPostClient extends PostClient {
     }
 
     return videoResponseData.id;
+  }
+
+  async #publishVideoStory({
+    account,
+    medium,
+  }: {
+    account: SocialAccount;
+    medium: PostMedia;
+  }): Promise<string> {
+    const uploadSessionResponse = await axios.post(
+      `https://graph.facebook.com/v20.0/${account.social_provider_user_id}/video_stories`,
+      {
+        upload_phase: "start",
+        access_token: account.access_token,
+      }
+    );
+
+    const uploadSessionResponseData = uploadSessionResponse.data;
+
+    if (uploadSessionResponseData?.error) {
+      console.error(uploadSessionResponseData);
+      throw new Error(
+        `Failed to create upload session: ${uploadSessionResponseData.error.message}`
+      );
+    }
+
+    const fileUrl = await this.getSignedUrlForFile(medium);
+
+    logger.info("Upload Started", { uploadSessionResponseData });
+    const uploadVideoResponse = await axios.post(
+      uploadSessionResponseData.upload_url,
+      null,
+      {
+        headers: {
+          Authorization: `OAuth ${account.access_token}`,
+          file_url: fileUrl,
+        },
+      }
+    );
+
+    const uploadVideoResponseData = uploadVideoResponse.data;
+
+    if (uploadVideoResponseData?.error) {
+      console.error(uploadVideoResponseData);
+      throw new Error(
+        `Failed to upload video: ${uploadVideoResponseData.error.message}`
+      );
+    }
+
+    let videoStatus = "processing";
+    let videoStatusResponse;
+    let vidoeAttempts = 0;
+    const videoDelay = 5000;
+    const videoMaxAttempts = 48;
+
+    while (
+      !this.#completeStatuses.includes(videoStatus) &&
+      vidoeAttempts < videoMaxAttempts
+    ) {
+      videoStatusResponse = await axios.get(
+        `https://graph.facebook.com/${uploadSessionResponseData.video_id}?fields=status`,
+        {
+          headers: {
+            Authorization: `OAuth ${account.access_token}`,
+            "Content-Type": "application/json; charset=UTF-8",
+          },
+        }
+      );
+
+      videoStatus = videoStatusResponse.data?.status?.video_status;
+      vidoeAttempts++;
+
+      logger.info("Video processing wating", {
+        data: videoStatusResponse.data,
+        videoStatus,
+        videoDelay,
+        vidoeAttempts,
+      });
+      await new Promise((resolve) => setTimeout(resolve, videoDelay));
+    }
+
+    if (videoStatus === "error") {
+      throw new Error(`Failed to process video`);
+    }
+
+    const createdMediaId = uploadSessionResponseData.video_id;
+
+    const storyResponse = await axios.post(
+      `https://graph.facebook.com/v20.0/${account.social_provider_user_id}/video_stories`,
+      {
+        video_id: createdMediaId,
+        upload_phase: "finish",
+        access_token: account.access_token,
+      }
+    );
+
+    const storyResponseData = storyResponse.data;
+
+    logger.info("Story response", { storyResponseData });
+
+    if (storyResponseData?.error) {
+      throw new Error(
+        `Failed to create story: ${storyResponseData.error.message}`
+      );
+    }
+
+    let status = "processing";
+    let statusResponse;
+    let attempts = 0;
+    const delay = 5000;
+    const maxAttempts = 48;
+
+    while (
+      !["error", "completed", "complete"].includes(status) &&
+      attempts < maxAttempts
+    ) {
+      try {
+        statusResponse = await axios.get(
+          `https://graph.facebook.com/${createdMediaId}?fields=status`,
+          {
+            headers: {
+              Authorization: `OAuth ${account.access_token}`,
+              "Content-Type": "application/json; charset=UTF-8",
+            },
+          }
+        );
+
+        status = statusResponse.data?.status?.processing_phase?.status;
+
+        logger.info("Video processing wating", {
+          data: statusResponse.data,
+          status,
+          delay,
+          attempts,
+        });
+      } catch (err) {
+        logger.error("Error getting video status", {
+          err,
+        });
+      } finally {
+        attempts++;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    if (status === "error") {
+      const error = statusResponse?.data?.status?.processing_phase?.errors
+        ?.map((error: { message?: string }) => error.message)
+        .join(", ");
+      throw new Error(`Failed to process video ${error}`);
+    }
+
+    return storyResponseData?.post_id;
+  }
+
+  async #publishPhotoStory({
+    account,
+    caption,
+    medium,
+  }: {
+    account: SocialAccount;
+    caption: string;
+    medium: PostMedia;
+  }): Promise<string> {
+    const fileUrl = await this.getSignedUrlForFile(medium);
+    const payload = {
+      url: fileUrl,
+      message: caption,
+      published: false,
+      access_token: account.access_token,
+    };
+
+    this.#requests.push({
+      photoRequest: {
+        url: `https://graph-video.facebook.com/v20.0/${account.social_provider_user_id}/photos`,
+        data: payload,
+      },
+    });
+    const photoResponse = await axios.post(
+      `https://graph.facebook.com/v20.0/${account.social_provider_user_id}/photos`,
+      payload
+    );
+
+    this.#responses.push({ photoResponse: photoResponse.data });
+    if (photoResponse.data.error) {
+      throw new Error(
+        `Failed to upload image: ${photoResponse.data.error.message}`
+      );
+    }
+
+    const createdMediaId = photoResponse.data.id;
+
+    const storyResponse = await axios.post(
+      `https://graph.facebook.com/v20.0/${account.social_provider_user_id}/photo_stories`,
+      {
+        photo_id: createdMediaId,
+        access_token: account.access_token,
+      }
+    );
+
+    const storyResponseData = storyResponse.data;
+
+    logger.info("Story response", { storyResponseData });
+
+    if (storyResponseData?.error) {
+      throw new Error(
+        `Failed to create story: ${storyResponseData.error.message}`
+      );
+    }
+
+    return storyResponseData?.post_id;
+  }
+
+  async #getStoryUrl({
+    platformId,
+    accessToken,
+  }: {
+    platformId: string;
+    accessToken: string;
+  }): Promise<string | undefined> {
+    const postResponse = await axios.get(
+      `https://graph.facebook.com/v20.0}/${platformId}?fields=url&access_token=${accessToken}`
+    );
+
+    const postResponseData = postResponse.data as {
+      url: string;
+    };
+
+    return postResponseData?.url;
+  }
+
+  async #publishReel({
+    account,
+    caption,
+    medium,
+  }: {
+    account: SocialAccount;
+    medium: PostMedia;
+    caption: string;
+  }) {
+    const uploadSessionResponse = await axios.post(
+      `https://graph.facebook.com/v20.0/${account.social_provider_user_id}/video_stories`,
+      {
+        upload_phase: "start",
+        access_token: account.access_token,
+      }
+    );
+
+    const uploadSessionResponseData = uploadSessionResponse.data;
+
+    if (uploadSessionResponseData?.error) {
+      console.error(uploadSessionResponseData);
+      throw new Error(
+        `Failed to create upload session: ${uploadSessionResponseData.error.message}`
+      );
+    }
+
+    const fileUrl = await this.getSignedUrlForFile(medium);
+
+    logger.info("Upload Started", { uploadSessionResponseData });
+    const uploadVideoResponse = await axios.post(
+      uploadSessionResponseData.upload_url,
+      null,
+      {
+        headers: {
+          Authorization: `OAuth ${account.access_token}`,
+          file_url: fileUrl,
+        },
+      }
+    );
+
+    const uploadVideoResponseData = uploadVideoResponse.data;
+
+    if (uploadVideoResponseData?.error) {
+      console.error(uploadVideoResponseData);
+      throw new Error(
+        `Failed to upload video: ${uploadVideoResponseData.error.message}`
+      );
+    }
+
+    let videoStatus = "processing";
+    let videoStatusResponse;
+    let vidoeAttempts = 0;
+    const videoDelay = 5000;
+    const videoMaxAttempts = 48;
+
+    while (
+      !this.#completeStatuses.includes(videoStatus) &&
+      vidoeAttempts < videoMaxAttempts
+    ) {
+      videoStatusResponse = await axios.get(
+        `https://graph.facebook.com/${uploadSessionResponseData.video_id}?fields=status`,
+        {
+          headers: {
+            Authorization: `OAuth ${account.access_token}`,
+            "Content-Type": "application/json; charset=UTF-8",
+          },
+        }
+      );
+
+      videoStatus = videoStatusResponse.data?.status?.video_status;
+      vidoeAttempts++;
+
+      logger.info("Video processing wating", {
+        data: videoStatusResponse.data,
+        videoStatus,
+        videoDelay,
+        vidoeAttempts,
+      });
+      await new Promise((resolve) => setTimeout(resolve, videoDelay));
+    }
+
+    if (videoStatus === "error") {
+      throw new Error(`Failed to process video`);
+    }
+
+    const createdMediaId = uploadSessionResponseData.video_id;
+
+    const reelResponse = await axios.post(
+      `https://graph.facebook.com/v20.0/${account.social_provider_user_id}/video_stories`,
+      {
+        video_id: createdMediaId,
+        upload_phase: "finish",
+        video_state: "PUBLISHED",
+        description: caption,
+        access_token: account.access_token,
+      }
+    );
+
+    const reelResponseData = reelResponse.data;
+
+    logger.info("Reel response", { storyResponseData: reelResponseData });
+
+    if (reelResponseData?.error) {
+      throw new Error(
+        `Failed to create reel: ${reelResponseData.error.message}`
+      );
+    }
+
+    let status = "processing";
+    let statusResponse;
+    let attempts = 0;
+    const delay = 5000;
+    const maxAttempts = 48;
+
+    while (
+      !["error", "completed", "complete"].includes(status) &&
+      attempts < maxAttempts
+    ) {
+      try {
+        statusResponse = await axios.get(
+          `https://graph.facebook.com/${createdMediaId}?fields=status`,
+          {
+            headers: {
+              Authorization: `OAuth ${account.access_token}`,
+              "Content-Type": "application/json; charset=UTF-8",
+            },
+          }
+        );
+
+        status = statusResponse.data?.status?.processing_phase?.status;
+
+        logger.info("Video processing wating", {
+          data: statusResponse.data,
+          status,
+          delay,
+          attempts,
+        });
+      } catch (err) {
+        logger.error("Error getting video status", {
+          err,
+        });
+      } finally {
+        attempts++;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    if (status === "error") {
+      const error = statusResponse?.data?.status?.processing_phase?.errors
+        ?.map((error: { message?: string }) => error.message)
+        .join(", ");
+      throw new Error(`Failed to process video ${error}`);
+    }
+
+    return createdMediaId;
   }
 }
