@@ -1,10 +1,10 @@
 import { logger, task } from "@trigger.dev/sdk";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
-import fetch from "node-fetch";
 import { v4 as uuidv4 } from "uuid";
-
+import { Upload } from "tus-js-client";
 import { Database } from "@post-for-me/db";
+import fetch from "node-fetch";
 
 // Single Supabase client instance
 const supabaseClient = createClient<Database>(
@@ -77,8 +77,11 @@ const streamDownloadAndUpload = async (fileUrl: string, prefix: string) => {
 
   const response = await fetch(fileUrl);
   if (!response.ok) {
+    logger.log("Failed to download", { response });
     throw new Error(`Failed to download file: ${response.statusText}`);
   }
+
+  const buffer = await response.arrayBuffer();
 
   if (!response.body) {
     throw new Error("No response body available for streaming");
@@ -97,17 +100,47 @@ const streamDownloadAndUpload = async (fileUrl: string, prefix: string) => {
     contentLength: contentLength ? `${contentLength} bytes` : "unknown",
   });
 
-  // Upload directly from stream to Supabase
-  const { error } = await supabaseClient.storage
-    .from("post-media")
-    .upload(fileName, response.body, {
-      contentType,
-      duplex: "half",
+  const bucketName = "post-media";
+
+  await new Promise<void>((resolve, reject) => {
+    const upload = new Upload(Buffer.from(buffer), {
+      endpoint: `${process.env.SUPABASE_URL}/storage/v1/upload/resumable`,
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      headers: {
+        authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        "x-upsert": "true",
+      },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true, // Important if you want to allow re-uploading the same file https://github.com/tus/tus-js-client/blob/main/docs/api.md#removefingerprintonsuccess
+      metadata: {
+        bucketName: "post-media",
+        objectName: fileName,
+        contentType: contentType,
+        cacheControl: "3600",
+      },
+      chunkSize: 6 * 1024 * 1024, // NOTE: it must be set to 6MB (for now) do not change it
+      onError: function (error) {
+        logger.error("Failed uploading File", { error });
+        reject(error);
+      },
+      onSuccess: function () {
+        logger.info("File uploaded succesfully", { bucketName, fileName });
+        resolve();
+      },
     });
 
-  if (error) {
-    throw new Error(`Failed to upload file: ${error.message}`);
-  }
+    // Check if there are any previous uploads to continue.
+    return upload.findPreviousUploads().then(function (previousUploads) {
+      // Found previous uploads so we select the first one.
+      if (previousUploads.length) {
+        upload.resumeFromPreviousUpload(previousUploads[0]);
+      }
+
+      // Start the upload
+      logger.info("Starting video upload", { bucketName, fileName });
+      upload.start();
+    });
+  });
 
   logger.info(`File streamed and uploaded successfully: ${fileName}`);
 
@@ -125,7 +158,12 @@ const streamDownloadAndUpload = async (fileUrl: string, prefix: string) => {
 export const processPostMedium = task({
   id: "process-post-medium",
   maxDuration: 800,
-  retry: { maxAttempts: 3 },
+  retry: {
+    maxAttempts: 2,
+    outOfMemory: {
+      machine: "large-1x",
+    },
+  },
   machine: "medium-2x",
   run: async ({
     medium: {
