@@ -104,6 +104,7 @@ export interface InstagramConfiguration {
   caption?: string;
   placement?: string;
   media?: PostMedia[];
+  collaborators?: string[];
 }
 
 export interface TiktokConfiguration {

@@ -107,20 +107,24 @@ export class InstagramPostClient extends PostClient {
   }): Promise<PostResult> {
     try {
       const sanitizedCaption = this.#sanitizeCaption(caption);
+
+      const collaborators = platformConfig?.collaborators?.slice(0, 3);
+
       let containerId = null;
       if (media.length == 1) {
-        const medium = media[0];
         containerId = await this.#processMedia({
           account,
           media,
-          coverTimestamp: medium.thumbnail_timestamp_ms || undefined,
           caption: sanitizedCaption,
+          placement: platformConfig?.placement,
+          collaborators,
         });
       } else {
         containerId = await this.#processCarousel({
           account,
           media,
           caption: sanitizedCaption,
+          collaborators,
         });
       }
 
@@ -215,41 +219,67 @@ export class InstagramPostClient extends PostClient {
   async #processMedia({
     account,
     media,
-    coverTimestamp,
     caption,
+    placement,
+    collaborators,
   }: {
     account: SocialAccount;
     media: PostMedia[];
-    coverTimestamp: number | undefined;
     caption: string;
+    placement: string | undefined;
+    collaborators: string[] | undefined;
   }): Promise<string> {
     const medium = media[0];
 
     const isVideo = medium.type === "video";
     let signedUrl = "";
+    let thumbnailUrl: string | undefined = "";
     if (!isVideo) {
       const transformedImage = await this.#transformImage({ medium });
       signedUrl = transformedImage.signedUrl!;
     } else {
       signedUrl = await this.getSignedUrlForFile(medium);
+      if (medium.thumbnail_url) {
+        const transformedThumbnail = await this.#transformImage({
+          medium: { url: medium.thumbnail_url, type: "image" },
+        });
+        thumbnailUrl = transformedThumbnail.signedUrl;
+      }
     }
 
     const createMediaParams: {
-      media_type: string;
+      media_type?: string;
       caption: string;
       access_token: string;
       thumb_offset?: number;
       video_url?: string;
       image_url?: string;
+      cover_url?: string;
+      collaborators?: string[];
     } = {
-      media_type: isVideo ? "REELS" : "IMAGE",
       [isVideo ? "video_url" : "image_url"]: signedUrl,
       caption: caption,
       access_token: account.access_token,
     };
 
-    if (isVideo && coverTimestamp) {
-      createMediaParams.thumb_offset = coverTimestamp;
+    switch (placement) {
+      case "stories":
+        createMediaParams.media_type = "STORIES";
+        break;
+      default:
+        createMediaParams.media_type = isVideo ? "REELS" : "IMAGE";
+
+        if (thumbnailUrl) {
+          createMediaParams.cover_url = thumbnailUrl;
+        } else if (medium.thumbnail_timestamp_ms) {
+          createMediaParams.thumb_offset = medium.thumbnail_timestamp_ms;
+        }
+
+        if (collaborators && collaborators.length > 0) {
+          createMediaParams.collaborators = collaborators;
+        }
+
+        break;
     }
 
     this.#requests.push({ createMediaRequest: createMediaParams });
@@ -324,10 +354,12 @@ export class InstagramPostClient extends PostClient {
     account,
     media,
     caption,
+    collaborators,
   }: {
     account: SocialAccount;
     media: PostMedia[];
     caption: string;
+    collaborators: string[] | undefined;
   }): Promise<string> {
     const containerIds = [];
     const allowedMedia = media.slice(0, this.#maxItems);
@@ -389,22 +421,29 @@ export class InstagramPostClient extends PostClient {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
+    const carouselPayload: {
+      media_type: string;
+      children: string[];
+      caption: string;
+      access_token: string;
+      collaborators?: string[];
+    } = {
+      media_type: "CAROUSEL",
+      children: containerIds,
+      caption: caption,
+      access_token: account.access_token,
+    };
+
+    if (collaborators && collaborators.length > 0) {
+      carouselPayload.collaborators = collaborators;
+    }
+
     this.#requests.push({
-      createCarouselRequest: {
-        media_type: "CAROUSEL",
-        children: containerIds,
-        caption: caption,
-        access_token: account.access_token,
-      },
+      createCarouselRequest: carouselPayload,
     });
     const carouselResponse = await axios.post(
       `https://graph.facebook.com/v20.0/${account.social_provider_user_id}/media`,
-      {
-        media_type: "CAROUSEL",
-        children: containerIds,
-        caption: caption,
-        access_token: account.access_token,
-      }
+      carouselPayload
     );
 
     this.#responses.push({ createCarouselResponse: carouselResponse.data });
@@ -577,12 +616,129 @@ export class InstagramPostClient extends PostClient {
   }
 
   #sanitizeCaption(caption: string) {
-    const hashTags = (caption.match(/#[\w-]+/g) || []).slice(0, 30);
-    const textOnlyCaption = caption.replace(/#[\w-]+/g, "");
-    return (
-      textOnlyCaption.trim() +
-      (hashTags.length > 0 ? "\n\n" + hashTags.join(" ") : "")
-    );
+    // Instagram limits: 2,200 characters, 30 hashtags, 20 @ tags
+    const maxLength = 2200;
+    const maxHashtags = 30;
+    const maxMentions = 20;
+
+    let cleanedCaption = caption;
+
+    // First normalize whitespace
+    cleanedCaption = cleanedCaption
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .trim();
+
+    // Extract hashtags and mentions with their positions
+    const hashtagMatches = [
+      ...cleanedCaption.matchAll(/#[\w\u00C0-\u017F-]+/g),
+    ];
+    const mentionMatches = [
+      ...cleanedCaption.matchAll(/@[\w\u00C0-\u017F.-]+/g),
+    ];
+
+    // Remove duplicates and limit hashtags
+    if (hashtagMatches.length > 0) {
+      console.log(`Found ${hashtagMatches.length} hashtags`);
+
+      // Create a map to track unique hashtags (case-insensitive)
+      const uniqueHashtags = new Map();
+      const hashtagsToRemove = [];
+
+      // Process hashtags from end to beginning to maintain order
+      for (let i = hashtagMatches.length - 1; i >= 0; i--) {
+        const match = hashtagMatches[i];
+        const hashtag = match[0];
+        const lowerHashtag = hashtag.toLowerCase();
+
+        // If we've seen this hashtag before (duplicate) or we're over the limit, mark for removal
+        if (
+          uniqueHashtags.has(lowerHashtag) ||
+          uniqueHashtags.size >= maxHashtags
+        ) {
+          hashtagsToRemove.push({
+            text: hashtag,
+            index: match.index,
+            length: hashtag.length,
+          });
+        } else {
+          uniqueHashtags.set(lowerHashtag, hashtag);
+        }
+      }
+
+      // Remove excess/duplicate hashtags (from end to beginning to preserve indices)
+      if (hashtagsToRemove.length > 0) {
+        console.log(
+          `Removing ${hashtagsToRemove.length} excess/duplicate hashtags`
+        );
+
+        // Sort by index descending to remove from end first
+        hashtagsToRemove.sort((a, b) => b.index - a.index);
+
+        for (const toRemove of hashtagsToRemove) {
+          // Remove the hashtag and any trailing spaces
+          const beforeHashtag = cleanedCaption.substring(0, toRemove.index);
+          const afterHashtag = cleanedCaption.substring(
+            toRemove.index + toRemove.length
+          );
+
+          // Also remove trailing space if it exists
+          const trimmedAfter = afterHashtag.replace(/^[ \t]+/, "");
+          cleanedCaption = beforeHashtag + trimmedAfter;
+        }
+      }
+    }
+
+    // Handle mentions similarly
+    if (mentionMatches.length > maxMentions) {
+      console.log(
+        `Too many mentions (${mentionMatches.length}), limiting to ${maxMentions}`
+      );
+
+      // Remove excess mentions from the end
+      const mentionsToRemove = mentionMatches.slice(maxMentions);
+
+      // Sort by index descending to remove from end first
+      mentionsToRemove.sort((a, b) => b.index - a.index);
+
+      for (const match of mentionsToRemove) {
+        const beforeMention = cleanedCaption.substring(0, match.index);
+        const afterMention = cleanedCaption.substring(
+          match.index + match[0].length
+        );
+        const trimmedAfter = afterMention.replace(/^[ \t]+/, "");
+        cleanedCaption = beforeMention + trimmedAfter;
+      }
+    }
+
+    // Clean up any excessive whitespace that might have been created
+    cleanedCaption = cleanedCaption
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+    // Trim if over character limit
+    if (cleanedCaption.length > maxLength) {
+      console.log(
+        `Caption too long: ${cleanedCaption.length} chars, trimming to ${maxLength}`
+      );
+
+      let trimmedCaption = cleanedCaption.substring(0, maxLength);
+      const lastSpaceIndex = trimmedCaption.lastIndexOf(" ");
+
+      if (lastSpaceIndex > maxLength * 0.95) {
+        trimmedCaption = trimmedCaption.substring(0, lastSpaceIndex);
+      }
+
+      cleanedCaption = trimmedCaption.trim();
+    }
+
+    return cleanedCaption;
   }
 
   #getFileKeyFromPublicUrl(publicUrl: string, bucket: string): string | null {

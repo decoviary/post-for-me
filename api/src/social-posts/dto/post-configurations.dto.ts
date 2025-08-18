@@ -48,7 +48,24 @@ export class PinterestConfigurationDto extends BaseConfigurationDto {
   link?: string;
 }
 
-export class InstagramConfigurationDto extends BaseConfigurationDto {}
+export class InstagramConfigurationDto extends BaseConfigurationDto {
+  @ApiProperty({
+    description: 'Instagram post placement',
+    enum: ['reels', 'stories', 'timeline'],
+    nullable: true,
+    required: false,
+  })
+  placement?: string;
+
+  @ApiProperty({
+    description: 'Instagram usernames to be tagged as a collaborator',
+    type: Array,
+    items: { type: 'string' },
+    nullable: true,
+    required: false,
+  })
+  collaborators?: string[];
+}
 
 export class TiktokConfigurationDto extends BaseConfigurationDto {
   @ApiProperty({
@@ -183,7 +200,15 @@ export class YoutubeConfigurationDto extends BaseConfigurationDto {
   title?: string;
 }
 
-export class FacebookConfigurationDto extends BaseConfigurationDto {}
+export class FacebookConfigurationDto extends BaseConfigurationDto {
+  @ApiProperty({
+    description: 'Facebook post placement',
+    enum: ['reels', 'stories', 'timeline'],
+    nullable: true,
+    required: false,
+  })
+  placement?: string;
+}
 
 export class LinkedinConfigurationDto extends BaseConfigurationDto {}
 
@@ -191,12 +216,12 @@ export class BlueskyConfigurationDto extends BaseConfigurationDto {}
 
 export class ThreadsConfigurationDto extends BaseConfigurationDto {
   @ApiProperty({
-    description: 'Threads post location',
+    description: 'Threads post placement',
     enum: ['reels', 'timeline'],
     nullable: true,
     required: false,
   })
-  location?: 'reels' | 'timeline';
+  placement?: string;
 }
 
 // DTO's
@@ -316,12 +341,12 @@ export class AccountConfigurationDetailsDto {
   link?: string;
 
   @ApiProperty({
-    description: 'Threads post location',
-    enum: ['reels', 'timeline'],
+    description: 'Post placement for Facebook/Instagram/Threads',
+    enum: ['reels', 'timeline', 'stories'],
     nullable: true,
     required: false,
   })
-  location?: 'reels' | 'timeline';
+  placement?: 'reels' | 'timeline' | 'stories';
 
   @ApiProperty({
     description: 'Overrides the `title` from the post',
