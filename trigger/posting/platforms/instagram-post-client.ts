@@ -108,9 +108,7 @@ export class InstagramPostClient extends PostClient {
     try {
       const sanitizedCaption = this.#sanitizeCaption(caption);
 
-      const collaborators = platformConfig?.collaborators
-        ?.map((c) => c.username)
-        ?.slice(0, 3);
+      const collaborators = platformConfig?.collaborators?.slice(0, 3);
 
       let containerId = null;
       if (media.length == 1) {

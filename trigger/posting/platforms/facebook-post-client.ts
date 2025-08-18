@@ -496,7 +496,7 @@ export class FacebookPostClient extends PostClient {
     logger.info("Upload Started", { uploadSessionResponseData });
     const uploadVideoResponse = await axios.post(
       uploadSessionResponseData.upload_url,
-      null,
+      {},
       {
         headers: {
           Authorization: `OAuth ${account.access_token}`,
@@ -687,7 +687,7 @@ export class FacebookPostClient extends PostClient {
     accessToken: string;
   }): Promise<string | undefined> {
     const postResponse = await axios.get(
-      `https://graph.facebook.com/v20.0}/${platformId}?fields=url&access_token=${accessToken}`
+      `https://graph.facebook.com/v20.0/${platformId}?fields=url&access_token=${accessToken}`
     );
 
     const postResponseData = postResponse.data as {

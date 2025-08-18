@@ -104,12 +104,7 @@ export interface InstagramConfiguration {
   caption?: string;
   placement?: string;
   media?: PostMedia[];
-  collaborators?: Collaborator[];
-}
-
-export interface Collaborator {
-  id: string;
-  username: string;
+  collaborators?: string[];
 }
 
 export interface TiktokConfiguration {
