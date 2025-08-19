@@ -130,6 +130,15 @@ export class TiktokConfigurationDto extends BaseConfigurationDto {
     default: false,
   })
   is_ai_generated?: boolean;
+
+  @ApiProperty({
+    description:
+      'Will create a draft upload to TikTok, posting will need to be completed from within the app',
+    nullable: true,
+    required: false,
+    default: false,
+  })
+  is_draft?: boolean;
 }
 
 export class TiktokBusinessConfigurationDto extends BaseConfigurationDto {
@@ -402,6 +411,23 @@ export class AccountConfigurationDetailsDto {
     default: true,
   })
   disclose_branded_content?: boolean;
+
+  @ApiProperty({
+    description:
+      'Will create a draft upload to TikTok, posting will need to be completed from within the app',
+    nullable: true,
+    required: false,
+    default: false,
+  })
+  is_draft?: boolean;
+
+  @ApiProperty({
+    description: 'Flag content as AI generated on TikTok',
+    nullable: true,
+    required: false,
+    default: false,
+  })
+  is_ai_generated?: boolean;
 }
 
 export class AccountConfigurationDto {

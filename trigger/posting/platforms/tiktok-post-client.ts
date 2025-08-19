@@ -132,6 +132,25 @@ export class TikTokPostClient extends PostClient {
         });
       }
 
+      if (platformConfig?.is_draft) {
+        return {
+          success: true,
+          post_id: postId,
+          provider_connection_id: account.id,
+          details: {
+            status: "Saved as draft",
+            message:
+              "Content saved as draft in TikTok. Check your TikTok inbox notifications to continue editing and publish.",
+            addedMedia: this.#addedMedia,
+            requests: this.#requests,
+            responses: this.#responses,
+            username: creatorInfoResponse.data.data.creator_username,
+          },
+          provider_post_url: `https://www.tiktok.com/@${creatorInfoResponse.data.data.creator_username}`,
+          provider_post_id: publishId,
+        };
+      }
+
       const status = await this.#getPublishStatus({ publishId, account });
 
       if (this.#processingStatuses.includes(status)) {
@@ -148,6 +167,7 @@ export class TikTokPostClient extends PostClient {
             username: creatorInfoResponse.data.data.creator_username,
           },
           provider_post_url: `https://www.tiktok.com/@${creatorInfoResponse.data.data.creator_username}`,
+          provider_post_id: publishId,
         };
       }
 
@@ -309,6 +329,30 @@ export class TikTokPostClient extends PostClient {
     // Get the signed URL for the file
     const signedUrl = await this.getSignedUrlForFile(medium);
 
+    if (platformData?.is_draft) {
+      return await this.#getPublishId({
+        postUrl:
+          "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/",
+        payload: {
+          post_info: {
+            title: caption,
+            video_cover_timestamp_ms: coverTimestamp
+              ? coverTimestamp
+              : undefined,
+            is_aigc:
+              platformData?.is_ai_generated === undefined
+                ? false
+                : platformData.is_ai_generated,
+          },
+          source_info: {
+            source: "PULL_FROM_URL",
+            video_url: signedUrl,
+          },
+        },
+        account,
+      });
+    }
+
     return await this.#getPublishId({
       postUrl: "https://open.tiktokapis.com/v2/post/publish/video/init/",
       payload: {
@@ -406,7 +450,7 @@ export class TikTokPostClient extends PostClient {
           photo_cover_index: 0,
           photo_images: photoUrls,
         },
-        post_mode: "DIRECT_POST",
+        post_mode: platformData?.is_draft ? "MEDIA_UPLOAD" : "DIRECT_POST",
         media_type: "PHOTO",
       },
       account,
