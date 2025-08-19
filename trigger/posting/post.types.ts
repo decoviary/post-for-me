@@ -118,6 +118,7 @@ export interface TiktokConfiguration {
   disclose_your_brand?: boolean;
   disclose_branded_content?: boolean;
   is_ai_generated?: boolean;
+  is_draft?: boolean;
 }
 
 export interface TwitterConfiguration {

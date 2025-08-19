@@ -59,7 +59,6 @@ const tools = [
   {
     icon: Layers3Icon,
     title: "SDK's",
-    comingSoon: true,
     content: (
       <CardDescription>
         Drop-in libraries for rapid integration.
